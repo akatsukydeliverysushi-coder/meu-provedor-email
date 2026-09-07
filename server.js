@@ -57,7 +57,7 @@ async function initDatabase() {
   `);
   await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages (recipient_id, created_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender_id, created_at DESC)');
-  await pool.query(`CREATE TABLE IF NOT EXISTS message_deletions (message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY (message_id, user_id))`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS message_deletions (message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (message_id, user_id))`);
 }
 
 function normalizeEmail(email) {
@@ -152,13 +152,36 @@ app.post('/api/messages', requireAuth, async (req, res) => {
   }
 });
 
+function getSearch(req) {
+  return String(req.query.q || '').trim().slice(0, 100);
+}
+
+app.get('/api/messages/trash', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT m.id, m.subject, m.body, m.is_read, m.created_at, d.deleted_at,
+             su.name AS sender_name, su.email AS sender_email,
+             ru.name AS recipient_name, ru.email AS recipient_email
+      FROM message_deletions d
+      JOIN messages m ON m.id = d.message_id
+      JOIN users su ON su.id = m.sender_id
+      JOIN users ru ON ru.id = m.recipient_id
+      WHERE d.user_id = $1 ORDER BY d.deleted_at DESC LIMIT 100
+    `, [req.user.id]);
+    res.json({ messages: result.rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao carregar a lixeira.' });
+  }
+});
+
 app.get('/api/messages/inbox', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT m.id, m.subject, m.body, m.is_read, m.created_at, u.name AS sender_name, u.email AS sender_email
       FROM messages m JOIN users u ON u.id = m.sender_id
-      WHERE m.recipient_id = $1 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1) ORDER BY m.created_at DESC LIMIT 100
-    `, [req.user.id]);
+      WHERE m.recipient_id = $1 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1) AND ($2 = '' OR u.name ILIKE '%' || $2 || '%' OR u.email ILIKE '%' || $2 || '%' OR m.subject ILIKE '%' || $2 || '%' OR m.body ILIKE '%' || $2 || '%') ORDER BY m.created_at DESC LIMIT 100
+    `, [req.user.id, getSearch(req)]);
     res.json({ messages: result.rows });
   } catch (error) {
     console.error(error);
@@ -171,8 +194,8 @@ app.get('/api/messages/sent', requireAuth, async (req, res) => {
     const result = await pool.query(`
       SELECT m.id, m.subject, m.body, m.created_at, u.name AS recipient_name, u.email AS recipient_email
       FROM messages m JOIN users u ON u.id = m.recipient_id
-      WHERE m.sender_id = $1 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1) ORDER BY m.created_at DESC LIMIT 100
-    `, [req.user.id]);
+      WHERE m.sender_id = $1 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1) AND ($2 = '' OR u.name ILIKE '%' || $2 || '%' OR u.email ILIKE '%' || $2 || '%' OR m.subject ILIKE '%' || $2 || '%' OR m.body ILIKE '%' || $2 || '%') ORDER BY m.created_at DESC LIMIT 100
+    `, [req.user.id, getSearch(req)]);
     res.json({ messages: result.rows });
   } catch (error) {
     console.error(error);
@@ -228,6 +251,24 @@ app.delete('/api/messages/:id', requireAuth, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Erro ao excluir a mensagem.' });
   }
+});
+
+app.post('/api/messages/:id/restore', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Mensagem inválida.' });
+  await pool.query('DELETE FROM message_deletions WHERE message_id = $1 AND user_id = $2', [id, req.user.id]);
+  res.status(204).end();
+});
+
+app.delete('/api/messages/:id/permanent', requireAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Mensagem inválida.' });
+  await pool.query('DELETE FROM message_deletions WHERE message_id = $1 AND user_id = $2', [id, req.user.id]);
+  const check = await pool.query('SELECT id FROM messages WHERE id = $1 AND (sender_id = $2 OR recipient_id = $2)', [id, req.user.id]);
+  if (check.rowCount) {
+    await pool.query('INSERT INTO message_deletions (message_id, user_id) VALUES ($1, $2)', [id, req.user.id]);
+  }
+  res.status(204).end();
 });
 
 app.post('/api/logout', (req, res) => {
