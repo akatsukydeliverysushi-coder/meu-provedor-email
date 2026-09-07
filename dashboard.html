@@ -15,9 +15,9 @@
       <div class="toolbar">
         <button id="compose">✍️ Nova mensagem</button>
         <button id="inboxBtn" class="secondary">📥 Entrada <span id="unreadBadge"></span></button>
-        <button id="sentBtn" class="secondary">📤 Enviados</button>
+        <button id="sentBtn" class="secondary">📤 Enviados</button>\n        <button id="trashBtn" class="secondary">🗑️ Lixeira</button>
       </div>
-      <p id="status" class="message" hidden></p>
+      <p id="status" class="message" hidden></p>\n      <input id="search" type="search" placeholder="🔍 Pesquisar mensagens">
 
       <div id="composePanel" class="mailbox" hidden>
         <div class="mailbox-head"><strong>Nova mensagem</strong></div>
@@ -37,7 +37,7 @@
         <p id="readMeta" class="subtitle"></p>
         <div id="readBody" style="white-space:pre-wrap"></div>
         <hr>
-        <button id="replyBtn" type="button">↩️ Responder</button> <button id="deleteBtn" type="button" class="secondary">🗑️ Excluir</button>
+        <button id="replyBtn" type="button">↩️ Responder</button> <button id="deleteBtn" type="button" class="secondary">🗑️ Excluir</button> <button id="restoreBtn" type="button" class="secondary" hidden>♻️ Restaurar</button> <button id="permanentBtn" type="button" class="secondary" hidden>🗑️ Excluir definitivamente</button>
       </div>
 
       <div id="listPanel" class="mailbox">
@@ -84,14 +84,14 @@
     async function loadMessages() {
       document.getElementById('readPanel').hidden = true;
       document.getElementById('listPanel').hidden = false;
-      const endpoint = currentFolder === 'inbox' ? '/api/messages/inbox' : '/api/messages/sent';
-      const response = await fetch(endpoint, { credentials: 'include' });
+      const endpoint = currentFolder === 'inbox' ? '/api/messages/inbox' : currentFolder === 'sent' ? '/api/messages/sent' : '/api/messages/trash';
+      const query = currentFolder === 'trash' ? '' : '?q=' + encodeURIComponent(document.getElementById('search').value.trim());\n      const response = await fetch(endpoint + query, { credentials: 'include' });
       const data = await response.json();
       if (!response.ok) return showStatus(data.error || 'Não foi possível carregar.', true);
 
       const list = data.messages || [];
       loadUnreadCount();
-      document.getElementById('folderTitle').textContent = currentFolder === 'inbox' ? 'Caixa de entrada' : 'Enviados';
+      document.getElementById('folderTitle').textContent = currentFolder === 'inbox' ? 'Caixa de entrada' : currentFolder === 'sent' ? 'Enviados' : 'Lixeira';
       document.getElementById('count').textContent = list.length + (list.length === 1 ? ' mensagem' : ' mensagens');
       const container = document.getElementById('messages');
 
@@ -125,7 +125,7 @@
       document.getElementById('readBody').textContent = currentMessage.body;
       document.getElementById('listPanel').hidden = true;
       document.getElementById('readPanel').hidden = false;
-      document.getElementById('replyBtn').hidden = currentFolder !== 'inbox';
+      document.getElementById('replyBtn').hidden = currentFolder !== 'inbox';\n      document.getElementById('deleteBtn').hidden = currentFolder === 'trash';\n      document.getElementById('restoreBtn').hidden = currentFolder !== 'trash';\n      document.getElementById('permanentBtn').hidden = currentFolder !== 'trash';
       // A mensagem permanece aberta; a atualização da lista acontece ao fechar ou trocar de pasta.
     });
 
@@ -140,6 +140,24 @@
       if (!response.ok) return showStatus('Não foi possível excluir.', true);
       showStatus('Mensagem excluída.');
       currentMessage = null;
+      document.getElementById('readPanel').hidden = true;
+      document.getElementById('listPanel').hidden = false;
+      loadMessages();
+    };
+
+    document.getElementById('restoreBtn').onclick = async () => {
+      if (!currentMessage) return;
+      const response = await fetch('/api/messages/' + currentMessage.id + '/restore', { method: 'POST', credentials: 'include' });
+      if (!response.ok) return showStatus('Não foi possível restaurar.', true);
+      showStatus('Mensagem restaurada.');
+      currentFolder = 'inbox';
+      loadMessages();
+    };
+    document.getElementById('permanentBtn').onclick = async () => {
+      if (!currentMessage || !confirm('Excluir definitivamente da sua lixeira?')) return;
+      const response = await fetch('/api/messages/' + currentMessage.id + '/permanent', { method: 'DELETE', credentials: 'include' });
+      if (!response.ok) return showStatus('Não foi possível excluir.', true);
+      showStatus('Mensagem removida da lixeira.');
       document.getElementById('readPanel').hidden = true;
       document.getElementById('listPanel').hidden = false;
       loadMessages();
@@ -160,7 +178,7 @@
     };
 
     document.getElementById('inboxBtn').onclick = () => { currentFolder = 'inbox'; loadMessages(); };
-    document.getElementById('sentBtn').onclick = () => { currentFolder = 'sent'; loadMessages(); };
+    document.getElementById('sentBtn').onclick = () => { currentFolder = 'sent'; loadMessages(); };\n    document.getElementById('trashBtn').onclick = () => { currentFolder = 'trash'; loadMessages(); };\n    document.getElementById('search').addEventListener('input', () => { if (currentFolder !== 'trash') loadMessages(); });
 
     document.getElementById('messageForm').addEventListener('submit', async e => {
       e.preventDefault();
