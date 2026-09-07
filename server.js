@@ -44,6 +44,19 @@ async function initDatabase() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id BIGSERIAL PRIMARY KEY,
+      sender_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      subject VARCHAR(200) NOT NULL,
+      body TEXT NOT NULL,
+      is_read BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages (recipient_id, created_at DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender_id, created_at DESC)');
 }
 
 function normalizeEmail(email) {
@@ -83,16 +96,11 @@ app.post('/api/register', authLimiter, async (req, res) => {
     const name = String(req.body.name || '').trim();
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || '');
-
     if (name.length < 2 || name.length > 80) return res.status(400).json({ error: 'Informe um nome válido.' });
     if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'Informe um e-mail válido.' });
     if (password.length < 8 || password.length > 128) return res.status(400).json({ error: 'A senha deve ter entre 8 e 128 caracteres.' });
-
     const passwordHash = await bcrypt.hash(password, 12);
-    const result = await pool.query(
-      'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',
-      [name, email, passwordHash]
-    );
+    const result = await pool.query('INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email', [name, email, passwordHash]);
     const user = result.rows[0];
     setAuthCookie(res, createToken(user));
     res.status(201).json({ user });
@@ -122,14 +130,87 @@ app.post('/api/login', authLimiter, async (req, res) => {
 
 app.get('/api/me', requireAuth, (req, res) => res.json({ user: req.user }));
 
+app.post('/api/messages', requireAuth, async (req, res) => {
+  try {
+    const recipientEmail = normalizeEmail(req.body.recipient);
+    const subject = String(req.body.subject || '').trim();
+    const body = String(req.body.body || '').trim();
+    if (!/^\S+@\S+\.\S+$/.test(recipientEmail)) return res.status(400).json({ error: 'Informe o e-mail do destinatário.' });
+    if (!subject || subject.length > 200) return res.status(400).json({ error: 'O assunto é obrigatório e deve ter até 200 caracteres.' });
+    if (!body || body.length > 20000) return res.status(400).json({ error: 'A mensagem é obrigatória e deve ter até 20.000 caracteres.' });
+    const recipientResult = await pool.query('SELECT id, email FROM users WHERE email = $1', [recipientEmail]);
+    if (!recipientResult.rowCount) return res.status(404).json({ error: 'Destinatário não encontrado neste provedor.' });
+    const messageResult = await pool.query(
+      'INSERT INTO messages (sender_id, recipient_id, subject, body) VALUES ($1, $2, $3, $4) RETURNING id, subject, body, created_at',
+      [req.user.id, recipientResult.rows[0].id, subject, body]
+    );
+    res.status(201).json({ message: messageResult.rows[0] });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao enviar a mensagem.' });
+  }
+});
+
+app.get('/api/messages/inbox', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT m.id, m.subject, m.body, m.is_read, m.created_at, u.name AS sender_name, u.email AS sender_email
+      FROM messages m JOIN users u ON u.id = m.sender_id
+      WHERE m.recipient_id = $1 ORDER BY m.created_at DESC LIMIT 100
+    `, [req.user.id]);
+    res.json({ messages: result.rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao carregar a caixa de entrada.' });
+  }
+});
+
+app.get('/api/messages/sent', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT m.id, m.subject, m.body, m.created_at, u.name AS recipient_name, u.email AS recipient_email
+      FROM messages m JOIN users u ON u.id = m.recipient_id
+      WHERE m.sender_id = $1 ORDER BY m.created_at DESC LIMIT 100
+    `, [req.user.id]);
+    res.json({ messages: result.rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao carregar mensagens enviadas.' });
+  }
+});
+
+app.get('/api/messages/:id', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Mensagem inválida.' });
+    const result = await pool.query(`
+      SELECT m.id, m.subject, m.body, m.is_read, m.created_at,
+             su.name AS sender_name, su.email AS sender_email,
+             ru.name AS recipient_name, ru.email AS recipient_email
+      FROM messages m
+      JOIN users su ON su.id = m.sender_id
+      JOIN users ru ON ru.id = m.recipient_id
+      WHERE m.id = $1 AND (m.sender_id = $2 OR m.recipient_id = $2)
+    `, [id, req.user.id]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    const message = result.rows[0];
+    if (String(req.user.id) === String(message.recipient_id)) {
+      await pool.query('UPDATE messages SET is_read = TRUE WHERE id = $1 AND recipient_id = $2', [id, req.user.id]);
+      message.is_read = true;
+    }
+    res.json({ message });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao abrir a mensagem.' });
+  }
+});
+
 app.post('/api/logout', (req, res) => {
   res.clearCookie('session', { httpOnly: true, secure: isProduction, sameSite: 'lax', path: '/' });
   res.status(204).end();
 });
 
-initDatabase()
-  .then(() => app.listen(port, () => console.log(`Servidor ativo na porta ${port}`)))
-  .catch((error) => {
-    console.error('Falha ao iniciar banco:', error);
-    process.exit(1);
-  });
+initDatabase().then(() => app.listen(port, () => console.log(`Servidor ativo na porta ${port}`))).catch((error) => {
+  console.error('Falha ao iniciar banco:', error);
+  process.exit(1);
+});
