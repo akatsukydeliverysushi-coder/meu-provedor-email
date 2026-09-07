@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caixa de entrada - Meu E-mail</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="card wide">
+      <div class="brand">✉</div>
+      <h1 id="welcome">Minha caixa de entrada</h1>
+      <p class="subtitle" id="accountEmail">Carregando conta...</p>
+      <div class="mailbox">
+        <div class="mailbox-head"><strong>Caixa de entrada</strong><span>0 mensagens</span></div>
+        <div class="empty">📭<br><strong>Nenhum e-mail ainda</strong><br><small>Quando começarmos o serviço de e-mail, suas mensagens aparecerão aqui.</small></div>
+      </div>
+      <button id="logout">Sair</button>
+    </section>
+  </main>
+  <script>
+    async function loadAccount() {
+      const response = await fetch('/api/me', { credentials: 'include' });
+      if (!response.ok) return location.href = '/';
+      const data = await response.json();
+      document.getElementById('welcome').textContent = `Olá, ${data.user.name}`;
+      document.getElementById('accountEmail').textContent = data.user.email;
+    }
+    document.getElementById('logout').addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+      location.href = '/';
+    });
+    loadAccount();
+  </script>
+</body>
+</html>
