@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 
 const app = express();
@@ -23,6 +24,7 @@ const pool = new Pool({
 
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '20kb' }));
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname)));
 
 const authLimiter = rateLimit({
@@ -64,7 +66,7 @@ function setAuthCookie(res, token) {
 
 async function requireAuth(req, res, next) {
   try {
-    const token = req.cookies?.session;
+    const token = req.cookies.session;
     if (!token) return res.status(401).json({ error: 'Não autenticado.' });
     const payload = jwt.verify(token, jwtSecret);
     const result = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [payload.sub]);
