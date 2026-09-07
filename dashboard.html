@@ -14,7 +14,7 @@
       <p class="subtitle" id="accountEmail">Carregando conta...</p>
       <div class="toolbar">
         <button id="compose">✍️ Nova mensagem</button>
-        <button id="inboxBtn" class="secondary">📥 Entrada</button>
+        <button id="inboxBtn" class="secondary">📥 Entrada <span id="unreadBadge"></span></button>
         <button id="sentBtn" class="secondary">📤 Enviados</button>
       </div>
       <p id="status" class="message" hidden></p>
@@ -37,7 +37,7 @@
         <p id="readMeta" class="subtitle"></p>
         <div id="readBody" style="white-space:pre-wrap"></div>
         <hr>
-        <button id="replyBtn" type="button">↩️ Responder</button>
+        <button id="replyBtn" type="button">↩️ Responder</button> <button id="deleteBtn" type="button" class="secondary">🗑️ Excluir</button>
       </div>
 
       <div id="listPanel" class="mailbox">
@@ -74,6 +74,13 @@
       loadMessages();
     }
 
+    async function loadUnreadCount() {
+      const response = await fetch('/api/messages/unread-count', { credentials: 'include' });
+      if (!response.ok) return;
+      const data = await response.json();
+      document.getElementById('unreadBadge').textContent = data.count ? ' (' + data.count + ')' : '';
+    }
+
     async function loadMessages() {
       document.getElementById('readPanel').hidden = true;
       document.getElementById('listPanel').hidden = false;
@@ -83,6 +90,7 @@
       if (!response.ok) return showStatus(data.error || 'Não foi possível carregar.', true);
 
       const list = data.messages || [];
+      loadUnreadCount();
       document.getElementById('folderTitle').textContent = currentFolder === 'inbox' ? 'Caixa de entrada' : 'Enviados';
       document.getElementById('count').textContent = list.length + (list.length === 1 ? ' mensagem' : ' mensagens');
       const container = document.getElementById('messages');
@@ -124,6 +132,17 @@
     document.getElementById('closeRead').onclick = () => {
       document.getElementById('readPanel').hidden = true;
       document.getElementById('listPanel').hidden = false;
+    };
+
+    document.getElementById('deleteBtn').onclick = async () => {
+      if (!currentMessage || !confirm('Excluir esta mensagem da sua caixa?')) return;
+      const response = await fetch('/api/messages/' + currentMessage.id, { method: 'DELETE', credentials: 'include' });
+      if (!response.ok) return showStatus('Não foi possível excluir.', true);
+      showStatus('Mensagem excluída.');
+      currentMessage = null;
+      document.getElementById('readPanel').hidden = true;
+      document.getElementById('listPanel').hidden = false;
+      loadMessages();
     };
 
     document.getElementById('replyBtn').onclick = () => {
