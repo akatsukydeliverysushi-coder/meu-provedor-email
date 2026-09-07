@@ -8,16 +8,21 @@
 </head>
 <body>
   <main class="app">
-    <section class="card wide">
-      <div class="brand">✉</div>
-      <h1 id="welcome">Minha caixa de entrada</h1>
-      <p class="subtitle" id="accountEmail">Carregando conta...</p>
-      <div class="toolbar">
+    <section class="card wide webmail">
+      <header class="topbar"><div class="brand">✉</div><div><h1 id="welcome">Minha caixa de entrada</h1><p class="subtitle" id="accountEmail">Carregando conta...</p></div></header>
+      <div class="webmail-layout"><aside class="sidebar">
+        <button id="compose" class="compose-btn">✍️ Nova mensagem</button>
+        <nav class="toolbar">
         <button id="compose">✍️ Nova mensagem</button>
         <button id="inboxBtn" class="secondary">📥 Entrada <span id="unreadBadge"></span></button>
-        <button id="sentBtn" class="secondary">📤 Enviados</button>\n        <button id="trashBtn" class="secondary">🗑️ Lixeira</button>
-      </div>
-      <p id="status" class="message" hidden></p>\n      <input id="search" type="search" placeholder="🔍 Pesquisar mensagens">
+        <button id="sentBtn" class="secondary">📤 Enviados</button>
+        <button id="trashBtn" class="secondary">🗑️ Lixeira</button>
+        </nav>
+        <button id="logout" class="secondary logout-btn">Sair</button>
+      </aside>
+      <section class="content-area">
+      <p id="status" class="message" hidden></p>
+      <input id="search" type="search" placeholder="🔍 Pesquisar mensagens">
 
       <div id="composePanel" class="mailbox" hidden>
         <div class="mailbox-head"><strong>Nova mensagem</strong></div>
@@ -45,7 +50,8 @@
         <div id="messages" class="empty">📭<br><strong>Nenhuma mensagem ainda</strong></div>
       </div>
 
-      <button id="logout" class="secondary">Sair</button>
+      </section>
+      </div>
     </section>
   </main>
   <script>
@@ -85,7 +91,8 @@
       document.getElementById('readPanel').hidden = true;
       document.getElementById('listPanel').hidden = false;
       const endpoint = currentFolder === 'inbox' ? '/api/messages/inbox' : currentFolder === 'sent' ? '/api/messages/sent' : '/api/messages/trash';
-      const query = currentFolder === 'trash' ? '' : '?q=' + encodeURIComponent(document.getElementById('search').value.trim());\n      const response = await fetch(endpoint + query, { credentials: 'include' });
+      const query = currentFolder === 'trash' ? '' : '?q=' + encodeURIComponent(document.getElementById('search').value.trim());
+      const response = await fetch(endpoint + query, { credentials: 'include' });
       const data = await response.json();
       if (!response.ok) return showStatus(data.error || 'Não foi possível carregar.', true);
 
@@ -125,7 +132,10 @@
       document.getElementById('readBody').textContent = currentMessage.body;
       document.getElementById('listPanel').hidden = true;
       document.getElementById('readPanel').hidden = false;
-      document.getElementById('replyBtn').hidden = currentFolder !== 'inbox';\n      document.getElementById('deleteBtn').hidden = currentFolder === 'trash';\n      document.getElementById('restoreBtn').hidden = currentFolder !== 'trash';\n      document.getElementById('permanentBtn').hidden = currentFolder !== 'trash';
+      document.getElementById('replyBtn').hidden = currentFolder !== 'inbox';
+      document.getElementById('deleteBtn').hidden = currentFolder === 'trash';
+      document.getElementById('restoreBtn').hidden = currentFolder !== 'trash';
+      document.getElementById('permanentBtn').hidden = currentFolder !== 'trash';
       // A mensagem permanece aberta; a atualização da lista acontece ao fechar ou trocar de pasta.
     });
 
@@ -178,7 +188,9 @@
     };
 
     document.getElementById('inboxBtn').onclick = () => { currentFolder = 'inbox'; loadMessages(); };
-    document.getElementById('sentBtn').onclick = () => { currentFolder = 'sent'; loadMessages(); };\n    document.getElementById('trashBtn').onclick = () => { currentFolder = 'trash'; loadMessages(); };\n    document.getElementById('search').addEventListener('input', () => { if (currentFolder !== 'trash') loadMessages(); });
+    document.getElementById('sentBtn').onclick = () => { currentFolder = 'sent'; loadMessages(); };
+    document.getElementById('trashBtn').onclick = () => { currentFolder = 'trash'; loadMessages(); };
+    document.getElementById('search').addEventListener('input', () => { if (currentFolder !== 'trash') loadMessages(); });
 
     document.getElementById('messageForm').addEventListener('submit', async e => {
       e.preventDefault();
