@@ -57,6 +57,7 @@ async function initDatabase() {
   `);
   await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages (recipient_id, created_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages (sender_id, created_at DESC)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS message_deletions (message_id BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY (message_id, user_id))`);
 }
 
 function normalizeEmail(email) {
@@ -156,7 +157,7 @@ app.get('/api/messages/inbox', requireAuth, async (req, res) => {
     const result = await pool.query(`
       SELECT m.id, m.subject, m.body, m.is_read, m.created_at, u.name AS sender_name, u.email AS sender_email
       FROM messages m JOIN users u ON u.id = m.sender_id
-      WHERE m.recipient_id = $1 ORDER BY m.created_at DESC LIMIT 100
+      WHERE m.recipient_id = $1 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1) ORDER BY m.created_at DESC LIMIT 100
     `, [req.user.id]);
     res.json({ messages: result.rows });
   } catch (error) {
@@ -170,7 +171,7 @@ app.get('/api/messages/sent', requireAuth, async (req, res) => {
     const result = await pool.query(`
       SELECT m.id, m.subject, m.body, m.created_at, u.name AS recipient_name, u.email AS recipient_email
       FROM messages m JOIN users u ON u.id = m.recipient_id
-      WHERE m.sender_id = $1 ORDER BY m.created_at DESC LIMIT 100
+      WHERE m.sender_id = $1 AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1) ORDER BY m.created_at DESC LIMIT 100
     `, [req.user.id]);
     res.json({ messages: result.rows });
   } catch (error) {
@@ -190,7 +191,7 @@ app.get('/api/messages/:id', requireAuth, async (req, res) => {
       FROM messages m
       JOIN users su ON su.id = m.sender_id
       JOIN users ru ON ru.id = m.recipient_id
-      WHERE m.id = $1 AND (m.sender_id = $2 OR m.recipient_id = $2)
+      WHERE m.id = $1 AND (m.sender_id = $2 OR m.recipient_id = $2) AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $2)
     `, [id, req.user.id]);
     if (!result.rowCount) return res.status(404).json({ error: 'Mensagem não encontrada.' });
     const message = result.rows[0];
@@ -202,6 +203,30 @@ app.get('/api/messages/:id', requireAuth, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Erro ao abrir a mensagem.' });
+  }
+});
+
+app.get('/api/messages/unread-count', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT COUNT(*)::int AS count FROM messages m WHERE m.recipient_id = $1 AND m.is_read = FALSE AND NOT EXISTS (SELECT 1 FROM message_deletions d WHERE d.message_id = m.id AND d.user_id = $1)`, [req.user.id]);
+    res.json({ count: result.rows[0].count });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao contar mensagens.' });
+  }
+});
+
+app.delete('/api/messages/:id', requireAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Mensagem inválida.' });
+    const allowed = await pool.query('SELECT id FROM messages WHERE id = $1 AND (sender_id = $2 OR recipient_id = $2)', [id, req.user.id]);
+    if (!allowed.rowCount) return res.status(404).json({ error: 'Mensagem não encontrada.' });
+    await pool.query('INSERT INTO message_deletions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [id, req.user.id]);
+    res.status(204).end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao excluir a mensagem.' });
   }
 });
 
