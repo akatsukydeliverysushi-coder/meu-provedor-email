@@ -118,7 +118,7 @@
       document.getElementById('listPanel').hidden = true;
       document.getElementById('readPanel').hidden = false;
       document.getElementById('replyBtn').hidden = currentFolder !== 'inbox';
-      loadMessages();
+      // A mensagem permanece aberta; a atualização da lista acontece ao fechar ou trocar de pasta.
     });
 
     document.getElementById('closeRead').onclick = () => {
