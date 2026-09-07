@@ -18,6 +18,7 @@
         <button id="sentBtn" class="secondary">📤 Enviados</button>
       </div>
       <p id="status" class="message" hidden></p>
+
       <div id="composePanel" class="mailbox" hidden>
         <div class="mailbox-head"><strong>Nova mensagem</strong></div>
         <form id="messageForm">
@@ -27,63 +28,130 @@
           <button type="submit">Enviar mensagem</button>
         </form>
       </div>
-      <div class="mailbox">
+
+      <div id="readPanel" class="mailbox" hidden>
+        <div class="mailbox-head">
+          <strong id="readSubject">Mensagem</strong>
+          <button id="closeRead" type="button" class="secondary">Fechar</button>
+        </div>
+        <p id="readMeta" class="subtitle"></p>
+        <div id="readBody" style="white-space:pre-wrap"></div>
+        <hr>
+        <button id="replyBtn" type="button">↩️ Responder</button>
+      </div>
+
+      <div id="listPanel" class="mailbox">
         <div class="mailbox-head"><strong id="folderTitle">Caixa de entrada</strong><span id="count">0 mensagens</span></div>
         <div id="messages" class="empty">📭<br><strong>Nenhuma mensagem ainda</strong></div>
       </div>
+
       <button id="logout" class="secondary">Sair</button>
     </section>
   </main>
   <script>
     let currentFolder = 'inbox';
+    let currentMessage = null;
+    let currentUser = null;
     const statusEl = document.getElementById('status');
+
     function showStatus(text, error = false) {
       statusEl.textContent = text;
       statusEl.className = 'message ' + (error ? 'error' : 'success');
       statusEl.hidden = false;
     }
+
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
+
     async function loadAccount() {
       const response = await fetch('/api/me', { credentials: 'include' });
       if (!response.ok) return location.href = '/';
       const data = await response.json();
+      currentUser = data.user;
       document.getElementById('welcome').textContent = 'Olá, ' + data.user.name;
       document.getElementById('accountEmail').textContent = data.user.email;
       loadMessages();
     }
+
     async function loadMessages() {
+      document.getElementById('readPanel').hidden = true;
+      document.getElementById('listPanel').hidden = false;
       const endpoint = currentFolder === 'inbox' ? '/api/messages/inbox' : '/api/messages/sent';
       const response = await fetch(endpoint, { credentials: 'include' });
       const data = await response.json();
       if (!response.ok) return showStatus(data.error || 'Não foi possível carregar.', true);
+
       const list = data.messages || [];
       document.getElementById('folderTitle').textContent = currentFolder === 'inbox' ? 'Caixa de entrada' : 'Enviados';
       document.getElementById('count').textContent = list.length + (list.length === 1 ? ' mensagem' : ' mensagens');
       const container = document.getElementById('messages');
+
       if (!list.length) {
         container.className = 'empty';
         container.innerHTML = '📭<br><strong>Nenhuma mensagem ainda</strong>';
         return;
       }
+
       container.className = 'message-list';
       container.innerHTML = list.map(m => {
         const person = currentFolder === 'inbox' ? (m.sender_name || m.sender_email) : (m.recipient_name || m.recipient_email);
         const email = currentFolder === 'inbox' ? m.sender_email : m.recipient_email;
-        return '<article class="mail-item" data-id="' + m.id + '"><strong>' + escapeHtml(person) + '</strong><span>' + escapeHtml(email) + '</span><b>' + escapeHtml(m.subject) + '</b><small>' + new Date(m.created_at).toLocaleString('pt-BR') + '</small></article>';
+        const unread = currentFolder === 'inbox' && !m.is_read ? ' style="font-weight:bold"' : '';
+        return '<article class="mail-item" data-id="' + m.id + '"' + unread + '><strong>' + escapeHtml(person) + '</strong><span>' + escapeHtml(email) + '</span><b>' + escapeHtml(m.subject) + '</b><small>' + new Date(m.created_at).toLocaleString('pt-BR') + '</small></article>';
       }).join('');
     }
+
+    document.getElementById('messages').addEventListener('click', async event => {
+      const item = event.target.closest('.mail-item');
+      if (!item) return;
+      const response = await fetch('/api/messages/' + item.dataset.id, { credentials: 'include' });
+      const data = await response.json();
+      if (!response.ok) return showStatus(data.error || 'Não foi possível abrir.', true);
+      currentMessage = data.message;
+      document.getElementById('readSubject').textContent = currentMessage.subject;
+      const other = currentFolder === 'inbox'
+        ? (currentMessage.sender_name + ' <' + currentMessage.sender_email + '>')
+        : ('Para: ' + currentMessage.recipient_name + ' <' + currentMessage.recipient_email + '>');
+      document.getElementById('readMeta').textContent = other + ' • ' + new Date(currentMessage.created_at).toLocaleString('pt-BR');
+      document.getElementById('readBody').textContent = currentMessage.body;
+      document.getElementById('listPanel').hidden = true;
+      document.getElementById('readPanel').hidden = false;
+      document.getElementById('replyBtn').hidden = currentFolder !== 'inbox';
+      loadMessages();
+    });
+
+    document.getElementById('closeRead').onclick = () => {
+      document.getElementById('readPanel').hidden = true;
+      document.getElementById('listPanel').hidden = false;
+    };
+
+    document.getElementById('replyBtn').onclick = () => {
+      if (!currentMessage) return;
+      document.getElementById('readPanel').hidden = true;
+      document.getElementById('composePanel').hidden = false;
+      recipient.value = currentMessage.sender_email;
+      subject.value = currentMessage.subject.startsWith('Re:') ? currentMessage.subject : 'Re: ' + currentMessage.subject;
+      body.focus();
+    };
+
     document.getElementById('compose').onclick = () => {
       document.getElementById('composePanel').hidden = false;
-      document.getElementById('recipient').focus();
+      recipient.focus();
     };
+
     document.getElementById('inboxBtn').onclick = () => { currentFolder = 'inbox'; loadMessages(); };
     document.getElementById('sentBtn').onclick = () => { currentFolder = 'sent'; loadMessages(); };
+
     document.getElementById('messageForm').addEventListener('submit', async e => {
       e.preventDefault();
       const payload = { recipient: recipient.value.trim(), subject: subject.value.trim(), body: body.value.trim() };
-      const response = await fetch('/api/messages', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(payload) });
+      const response = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify(payload)
+      });
       const data = await response.json();
       if (!response.ok) return showStatus(data.error || 'Não foi possível enviar.', true);
       showStatus('Mensagem enviada com sucesso.');
@@ -92,10 +160,12 @@
       currentFolder = 'sent';
       loadMessages();
     });
+
     document.getElementById('logout').onclick = async () => {
       await fetch('/api/logout', { method: 'POST', credentials: 'include' });
       location.href = '/';
     };
+
     loadAccount();
   </script>
 </body>
