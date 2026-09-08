@@ -8,7 +8,10 @@
     "start": "node bootstrap.js",
     "android:prepare": "npx cap sync android",
     "android:open": "npx cap open android",
-    "android:build": "npm run android:prepare"
+    "android:build": "npm run android:prepare",
+    "android:init": "npx cap add android",
+    "android:sync": "npx cap sync android",
+    "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug"
   },
   "engines": {
     "node": "20.x"
@@ -19,7 +22,11 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "@capacitor/core": "^7.4.0",
+    "@capacitor/android": "^7.4.0",
+    "@capacitor/camera": "^7.0.2",
+    "@capacitor/microphone": "^7.0.2"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.0",
