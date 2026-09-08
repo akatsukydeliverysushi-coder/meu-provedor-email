@@ -1,91 +1,73 @@
-const fs = require('fs');
-const path = require('path');
-
-// Captura o app Express criado pelo servidor principal sem precisar reescrever server.js.
 const express = require('express');
-const originalListen = express.application.listen;
-let app;
-express.application.listen = function (...args) {
-  app = this;
-  return originalListen.apply(this, args);
-};
+const jwt = require('jsonwebtoken');
+
+// Captura a instância Express criada pelo server.js sem precisar alterar o backend existente.
+const originalExpress = express;
+let application = null;
+
+function expressWrapper(...args) {
+  application = originalExpress(...args);
+  return application;
+}
+Object.assign(expressWrapper, originalExpress);
+require.cache[require.resolve('express')].exports = expressWrapper;
 
 require('./server.js');
 
-if (!app) {
-  throw new Error('Não foi possível obter a aplicação Express de server.js.');
+if (!application) {
+  throw new Error('Não foi possível localizar a aplicação Express.');
 }
 
-// Garante explicitamente que a raiz do domínio entregue o index.html atual.
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+const jwtSecret = process.env.JWT_SECRET;
+const openaiKey = process.env.OPENAI_API_KEY;
 
-// Rotas explícitas para as páginas principais do aplicativo.
-for (const page of ['index.html', 'cadastro.html', 'dashboard.html']) {
-  app.get(`/${page}`, (req, res) => {
-    res.sendFile(path.join(__dirname, page));
-  });
-}
-
-// Endpoint opcional para identificar exatamente a versão que está rodando no Railway.
-app.get('/api/version', (req, res) => {
-  res.json({
-    app: 'VM',
-    version: 'railway-main-2026-09-08',
-    bootstrap: true
-  });
-});
-
-// Integração opcional com OpenAI. Só fica disponível quando OPENAI_API_KEY estiver configurada.
-const jwt = require('jsonwebtoken');
-
-app.post('/api/ai/chat', async (req, res) => {
+application.post('/api/ai/chat', async (req, res) => {
   try {
-    const token = req.cookies?.token;
+    if (!jwtSecret) return res.status(500).json({ error: 'JWT_SECRET não configurado.' });
+    if (!openaiKey) return res.status(503).json({ error: 'OPENAI_API_KEY não configurada no Railway.' });
+
+    const token = req.headers.cookie
+      ?.split(';')
+      .map(v => v.trim())
+      .find(v => v.startsWith('session='))
+      ?.slice('session='.length);
+
     if (!token) return res.status(401).json({ error: 'Não autenticado.' });
-
-    let user;
     try {
-      user = jwt.verify(token, process.env.JWT_SECRET);
+      jwt.verify(decodeURIComponent(token), jwtSecret);
     } catch {
-      return res.status(401).json({ error: 'Sessão inválida.' });
-    }
-
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(503).json({ error: 'Integração GPT ainda não configurada.' });
+      return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
     }
 
     const message = String(req.body?.message || '').trim();
-    if (!message) return res.status(400).json({ error: 'Mensagem vazia.' });
+    if (!message) return res.status(400).json({ error: 'Digite uma mensagem para o GPT.' });
+    if (message.length > 12000) return res.status(400).json({ error: 'Mensagem muito longa.' });
 
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${openaiKey}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || 'gpt-5-mini',
-        input: `Usuário autenticado ${user.id}: ${message}`,
-        store: false
+        store: false,
+        input: message
       })
     });
 
     const data = await response.json();
     if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'Erro na API da OpenAI.' });
+      console.error('OpenAI API:', data);
+      return res.status(502).json({ error: data?.error?.message || 'Erro ao consultar o GPT.' });
     }
 
-    const text = data.output_text || (data.output || [])
-      .flatMap(item => item.content || [])
-      .filter(item => item.type === 'output_text')
-      .map(item => item.text)
-      .join('\n');
-
-    res.json({ reply: text || 'Não foi possível obter uma resposta.' });
+    res.json({
+      reply: data.output_text || 'Não consegui gerar uma resposta.',
+      responseId: data.id || null
+    });
   } catch (error) {
-    console.error('Erro /api/ai/chat:', error);
+    console.error('Erro no GPT:', error);
     res.status(500).json({ error: 'Erro interno ao consultar o GPT.' });
   }
 });
