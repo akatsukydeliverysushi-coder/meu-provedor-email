@@ -5,7 +5,7 @@
   "description": "Backend do provedor de e-mail particular",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node bootstrap.js"
   },
   "engines": {
     "node": "20.x"
