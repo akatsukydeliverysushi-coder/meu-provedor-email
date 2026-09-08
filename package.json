@@ -5,7 +5,10 @@
   "description": "Backend do provedor de e-mail particular",
   "main": "server.js",
   "scripts": {
-    "start": "node bootstrap.js"
+    "start": "node bootstrap.js",
+    "android:prepare": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:build": "npm run android:prepare"
   },
   "engines": {
     "node": "20.x"
@@ -17,5 +20,10 @@
     "express-rate-limit": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.0",
+    "@capacitor/core": "^7.4.0",
+    "@capacitor/android": "^7.4.0"
   }
 }
