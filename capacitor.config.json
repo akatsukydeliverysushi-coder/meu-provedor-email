@@ -2,5 +2,13 @@
   "appId": "com.vm.messenger",
   "appName": "VM Messenger",
   "webDir": "www",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://meu-provedor-email-production-1d70.up.railway.app/",
+    "cleartext": false,
+    "androidScheme": "https",
+    "allowNavigation": [
+      "meu-provedor-email-production-1d70.up.railway.app"
+    ]
+  }
 }
