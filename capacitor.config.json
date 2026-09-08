@@ -1,0 +1,6 @@
+{
+  "appId": "com.vm.messenger",
+  "appName": "VM Messenger",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
